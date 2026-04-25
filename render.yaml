@@ -1,0 +1,26 @@
+services:
+  - type: web
+    name: job-gap-analyzer-api
+    env: python
+    region: singapore
+    plan: free
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT --workers 1
+    envVars:
+      - key: ADZUNA_APP_ID
+        sync: false
+      - key: ADZUNA_APP_KEY
+        sync: false
+      - key: OPENROUTER_API_KEY
+        sync: false
+      - key: RESEND_API_KEY
+        sync: false
+      - key: EMAIL_FROM
+        sync: false
+      - key: SCHEDULE_FILE_PATH
+        value: /tmp/schedule_config.json
+      - key: PYTHONIOENCODING
+        value: utf-8
+      - key: ALLOWED_ORIGINS
+        value: "*"
