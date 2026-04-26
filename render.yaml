@@ -24,8 +24,6 @@ services:
         value: utf-8
       - key: ALLOWED_ORIGINS
         value: "*"
-      - key: CRON_SECRET
-        sync: false
 
   - type: cron
     name: job-gap-analyzer-cron
@@ -33,19 +31,6 @@ services:
     region: singapore
     plan: free
     rootDir: backend
-    buildCommand: pip install httpx
+    buildCommand: pip install -q httpx
     schedule: "30 1 * * *"   # 07:00 IST = 01:30 UTC
-    startCommand: >-
-      python -c "
-      import httpx, os, sys;
-      url = os.environ['API_BASE_URL'].rstrip('/') + '/run-scheduled';
-      secret = os.environ.get('CRON_SECRET', '');
-      r = httpx.post(url, headers={'x-cron-secret': secret}, timeout=300);
-      print(r.status_code, r.text);
-      sys.exit(0 if r.is_success else 1)
-      "
-    envVars:
-      - key: API_BASE_URL
-        sync: false
-      - key: CRON_SECRET
-        sync: false
+    startCommand: python run_cron.py
