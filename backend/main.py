@@ -15,7 +15,7 @@ import pytz
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from dotenv import load_dotenv
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import FastAPI, File, Header, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
@@ -88,6 +88,7 @@ async def lifespan(app: FastAPI):
         CronTrigger(hour=7, minute=0, timezone=ist),
         id="email_alerts",
         replace_existing=True,
+        misfire_grace_time=6 * 3600,  # fire if woken up within 6h of scheduled time
     )
     scheduler.start()
     logger.info("Scheduler started -- email alerts fire at 07:00 IST daily")
@@ -612,6 +613,15 @@ def run_scheduled_analysis():
 @app.get("/health")
 def health():
     return {"status": "ok", "scheduler_running": scheduler.running}
+
+
+@app.post("/run-scheduled")
+async def trigger_scheduled(x_cron_secret: str = Header(default="")):
+    expected = os.environ.get("CRON_SECRET", "")
+    if expected and x_cron_secret != expected:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    asyncio.create_task(asyncio.to_thread(run_scheduled_analysis))
+    return {"status": "triggered"}
 
 
 @app.post("/parse-resume")
