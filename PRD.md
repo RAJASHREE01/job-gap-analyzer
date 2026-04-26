@@ -202,23 +202,23 @@ Adzuna API  LinkedIn    OpenRouter
 
 ---
 
-### 4.8 Scheduling — APScheduler
+### 4.8 Scheduling — cron-job.org + APScheduler
 
-**Need:** Fire the email digest at exactly 7:00 AM IST every day without an external cron service.
+**Need:** Fire the email digest at 7:00 AM IST every day reliably, even when the Render free-tier service is sleeping.
 
-**Why APScheduler:**
-- Runs inside the FastAPI process — no separate worker, no Celery, no Redis
-- `CronTrigger` with `pytz` timezone means `hour=7, minute=0, timezone=Asia/Kolkata` fires at precisely 7:00 AM IST regardless of server timezone (Render runs UTC)
-- `BackgroundScheduler(daemon=True)` doesn't block the event loop
-- `replace_existing=True` prevents duplicate jobs on hot reload
+**Architecture (two-layer):**
+
+1. **cron-job.org (primary trigger):** A free external cron service calls `POST /run-scheduled` at `30 1 * * *` (01:30 UTC = 07:00 IST) daily. This wakes the Render service if sleeping and triggers the analysis pipeline. A second cron-job.org job pings `GET /health` every 5 minutes to keep the service warm so the 7 AM trigger hits instantly.
+
+2. **APScheduler (backup trigger):** `BackgroundScheduler` with `CronTrigger(hour=7, minute=0, timezone=Asia/Kolkata)` runs inside the FastAPI process. `misfire_grace_time=6*3600` means if the process was paused and wakes up within 6 hours of 7 AM, it still fires. This catches cases where cron-job.org misses a run.
+
+**`/run-scheduled` endpoint:** Accepts GET or POST with no required body. Fires `run_scheduled_analysis()` as a background task and returns `{"status": "triggered"}` immediately. Optionally protected by `CRON_SECRET` env var header check.
+
+**Why APScheduler alone was not enough:** Render free tier pauses the process after 15 min inactivity. APScheduler's default `misfire_grace_time` is 1 second — if the process is paused at 7 AM and wakes at 10 AM, the job is silently skipped. Fixed by setting `misfire_grace_time=6*3600`.
 
 **Why not Celery + Redis:** Massive over-engineering. Celery requires a message broker (Redis), a separate worker process, and additional cloud services — all for one daily job.
 
-**Why not an OS cron (`crontab`):** Render's free tier containers don't expose crontab. Also, the cron job needs access to the in-memory schedule config, which lives in the Python process.
-
-**Why not cron-job.org for the email trigger:** cron-job.org can only make HTTP GET/POST requests. The scheduler logic (read config, fetch jobs, run LLM analysis, format email) would all have to be exposed as a public endpoint — a security and complexity issue. Better to keep it internal.
-
-**Note:** cron-job.org *is* used separately for keep-alive pings (hitting `/health` every 10 minutes) to prevent Render's free tier from sleeping the container.
+**Why not Render Cron Jobs:** Render's `type: cron` in `render.yaml` only takes effect when the project is set up via Render Blueprints. Services created manually via the dashboard don't auto-create new services from yaml changes.
 
 ---
 
@@ -360,8 +360,15 @@ Adzuna API  LinkedIn    OpenRouter
 ## 7. Data Flow — Daily Email Alert
 
 ```
-APScheduler fires at 07:00 IST daily
-  → Read schedule_config.json (enabled, keyword, resume, email)
+cron-job.org fires at 01:30 UTC (07:00 IST) daily
+  → POST https://job-gap-analyzer-api.onrender.com/run-scheduled
+  → Render wakes service if sleeping (cold start ~30s)
+  → /run-scheduled fires run_scheduled_analysis() as background task
+  → Returns {"status": "triggered"} immediately
+
+run_scheduled_analysis():
+  → Read /tmp/schedule_config.json (enabled, keyword, resume, email)
+  → If not enabled or file missing: return (no-op)
   → resolve_keywords(keyword)[:2]  -- max 2 keywords
   → fetch_jobs_multi_city(keywords, hours_back=24, cities=SCHED_CITIES)  -- only last 24h
   → If no new jobs: skip email, log info
@@ -369,6 +376,9 @@ APScheduler fires at 07:00 IST daily
   → build_email_html(): styled HTML with job cards
   → Resend API: POST /emails
   → Write last_sent timestamp to schedule_config.json
+
+APScheduler (backup): also fires run_scheduled_analysis() at 07:00 IST
+  with misfire_grace_time=6h in case cron-job.org misses a run
 ```
 
 ---
@@ -399,8 +409,8 @@ With daily scheduling, 31 days uses 248 of 250 calls. Manual searches should be 
 
 | Limitation | Impact | Mitigation |
 |------------|--------|------------|
-| Render free tier sleeps after 15 min inactivity | First request takes 30–60s to wake up | cron-job.org pings `/health` every 10 min |
-| schedule_config.json lost on Render redeploy | Email alerts reset | `SCHEDULE_FILE_PATH=/tmp/` persists within a running container; users re-enable after deploy |
+| Render free tier sleeps after 15 min inactivity | 7 AM cron hits sleeping service | cron-job.org pings `/health` every 5 min to keep service warm; APScheduler `misfire_grace_time=6h` fires if woken within 6h |
+| schedule_config.json lost on Render redeploy | Email alerts stop until re-enabled | `/tmp/` persists across sleep/wake cycles but is wiped on redeploy; re-enable alerts from the frontend after any redeploy |
 | Scanned PDF resumes return no text | Upload fails with error | Clear error message; fallback to paste mode |
 | LinkedIn guest API may return 429 on heavy use | Job URL not found, falls back to Adzuna redirect | URL lookup wrapped in try/except; Adzuna URL used as fallback |
 | Adzuna free tier: 250 calls/month | Can't run hourly scans | Capped at 1×/day, 2 keywords, 4 cities |

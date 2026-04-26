@@ -615,7 +615,7 @@ def health():
     return {"status": "ok", "scheduler_running": scheduler.running}
 
 
-@app.post("/run-scheduled")
+@app.api_route("/run-scheduled", methods=["GET", "POST"])
 async def trigger_scheduled(x_cron_secret: str = Header(default="")):
     expected = os.environ.get("CRON_SECRET", "")
     if expected and x_cron_secret != expected:
