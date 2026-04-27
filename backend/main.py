@@ -124,24 +124,32 @@ class AnalyzeUrlRequest(BaseModel):
 # ── LLM ──────────────────────────────────────────────────────────────────────
 
 def _llm(prompt: str, temperature: float = 0.3, timeout: int = 60) -> str | None:
-    try:
-        r = httpx.post(
-            OPENROUTER_URL,
-            headers={
-                "Authorization": f"Bearer {os.environ.get('OPENROUTER_API_KEY')}",
-                "Content-Type": "application/json",
-            },
-            json={"model": MODEL, "messages": [{"role": "user", "content": prompt}], "temperature": temperature},
-            timeout=timeout,
-        )
-        body = r.json()
-        if r.status_code != 200 or "error" in body:
-            logger.error("LLM error: %s", body.get("error", r.status_code))
-            return None
-        return body["choices"][0]["message"]["content"] or ""
-    except Exception as exc:
-        logger.error("LLM call failed: %s", exc)
-        return None
+    for attempt in range(3):
+        try:
+            r = httpx.post(
+                OPENROUTER_URL,
+                headers={
+                    "Authorization": f"Bearer {os.environ.get('OPENROUTER_API_KEY')}",
+                    "Content-Type": "application/json",
+                },
+                json={"model": MODEL, "messages": [{"role": "user", "content": prompt}], "temperature": temperature},
+                timeout=timeout,
+            )
+            body = r.json()
+            if r.status_code == 429:
+                wait = 30 * (attempt + 1)
+                logger.warning("_llm rate limited, retrying in %ds", wait)
+                time.sleep(wait)
+                continue
+            if r.status_code != 200 or "error" in body:
+                logger.error("LLM error: %s", body.get("error", r.status_code))
+                return None
+            return body["choices"][0]["message"]["content"] or ""
+        except Exception as exc:
+            logger.error("LLM call failed: %s", exc)
+            if attempt < 2:
+                time.sleep(10)
+    return None
 
 
 def resolve_keywords(text: str) -> list[str]:
