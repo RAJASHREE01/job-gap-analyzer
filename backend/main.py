@@ -618,7 +618,7 @@ def run_scheduled_analysis():
 
 # ── Endpoints ────────────────────────────────────────────────────────────────
 
-@app.get("/health")
+@app.api_route("/health", methods=["GET", "HEAD"])
 def health():
     return {"status": "ok", "scheduler_running": scheduler.running}
 
