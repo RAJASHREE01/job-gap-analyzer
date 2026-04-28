@@ -14,6 +14,7 @@ import httpx
 import pytz
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
+from apscheduler.triggers.date import DateTrigger
 from dotenv import load_dotenv
 from fastapi import FastAPI, File, Header, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -83,15 +84,31 @@ scheduler = BackgroundScheduler(daemon=True)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     ist = pytz.timezone("Asia/Kolkata")
+
+    # Daily 7 AM IST
     scheduler.add_job(
         run_scheduled_analysis,
         CronTrigger(hour=7, minute=0, timezone=ist),
-        id="email_alerts",
+        id="email_alerts_7am",
         replace_existing=True,
-        misfire_grace_time=6 * 3600,  # fire if woken up within 6h of scheduled time
+        misfire_grace_time=6 * 3600,
     )
+
+    # One-time 6 PM IST today (only scheduled if we haven't passed it yet)
+    now_ist = datetime.now(ist)
+    today_6pm = now_ist.replace(hour=18, minute=0, second=0, microsecond=0)
+    if now_ist < today_6pm:
+        scheduler.add_job(
+            run_scheduled_analysis,
+            DateTrigger(run_date=today_6pm),
+            id="email_alert_6pm_today",
+            replace_existing=True,
+            misfire_grace_time=3600,
+        )
+        logger.info("One-time email scheduled for today at 18:00 IST")
+
     scheduler.start()
-    logger.info("Scheduler started -- email alerts fire at 07:00 IST daily")
+    logger.info("Scheduler started -- daily email at 07:00 IST, one-time at 18:00 IST today")
     yield
     scheduler.shutdown(wait=False)
 

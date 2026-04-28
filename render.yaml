@@ -18,8 +18,6 @@ services:
         sync: false
       - key: EMAIL_FROM
         sync: false
-      - key: SCHEDULE_FILE_PATH
-        value: /tmp/schedule_config.json
       - key: PYTHONIOENCODING
         value: utf-8
       - key: ALLOWED_ORIGINS
