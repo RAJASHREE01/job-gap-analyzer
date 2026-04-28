@@ -45,6 +45,8 @@ SERVICE_PATTERNS = [
     "burns & mcdonnell", "mondelez",
     "pricewaterhousecoopers", "pwc", "deloitte", "ernst & young", "kpmg",
     "subramaniam", "hemamalini",
+    "colan infotech", "valuelabs", "value labs", "turing", "trigent", "quess",
+    "teamlease", "randstad", "kelly services", "experis", "collabera",
 ]
 
 # Title must match at least one of these exact role phrases
